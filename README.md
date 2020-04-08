@@ -1,6 +1,6 @@
 # Women-in-the-loop
 
-![]("Hackathon_Banner_Final.jpg")
+![](Hackathon_Banner_Final.JPG)
 
 LearnX Sales Forecasting
 
