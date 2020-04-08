@@ -1,0 +1,531 @@
+---
+title: "LearnX Sales Forecasting"
+author: "Anushree Tomar"
+date: "28-03-2020"
+output:
+  pdf_document: default
+  word_document: default
+  html_document:
+    df_print: paged
+---
+
+# Problem statement
+
+LearnX is an online learning platform aimed at professionals and students. LearnX serves as a market place that allows instructors to build online courses on topics of their expertise which is later published after due diligence by the LearnX team. The platform covers a wide variety of topics including Development, Business, Finance & Accounting & Software Marketing and so on.
+
+Effective forecasting for course sales gives essential insight into upcoming cash flow meaning business can more accurately plan the budget to pay instructors and other operational costs and invest in the expansion of the business.
+
+Sales data for more than 2 years from 600 courses of LearnX's top domains is available along with information on:-
+
+•	Competition in the market for each course
+
+•	Course Type (Course/Program/Degree)
+
+•	Holiday Information for each day
+
+•	User Traffic on Course Page for each day
+
+Your task is to predict the course sales for each course in the test set for the next 60 days.
+
+# Data Dictionary
+
+The *Train data* (Historical Sales Data) has following attributes:-
+
+|Variable	|Definition|
+|---------|----------|
+|ID|	Unique Identifier for a row|
+|Day_No|	Day Number|
+|Course_ID|	Unique ID for a course|
+|Course_Domain|	Course Domain (Development, Finance etc.)|
+|Course_Type	|Course/Program/Degree|
+|Short_Promotio|	Whether Short Term Promotion is Live|
+|Public_Holiday	|Regional/Public Holiday|
+|Long_Promotion	|Whether Long Term Promotion is Live for the course|
+|User_Traffic	|Number of customers landing on the course page|
+|Competition_Metric	|A metric defining the strength of competition |
+|Sales	(Target)| Total Course Sales|
+
+
+The *Test data* (Next 60 Days)
+
+This file contains the store and day number for which the participant needs to submit predictions/forecasts
+
+|Variable|	Definition|
+|--------|------------|
+|ID	|Unique Identifier for a row|
+|Day_No	|Day Number|
+|Course_ID	|Unique ID for a course|
+|Course_Domain|	Course Domain (Development, Finance etc.)|
+|Course_Type	|Course/Program/Degree|
+|Short_Promotion|	Whether Short Term Promotion is Live|
+|Public_Holiday	|Regional/Public Holiday|
+|Long_Promotion|	Whether Long Term Promotion is Live for the course|
+|Competition_Metric|	A metric defining the strength of competition|
+
+*Sample Submission*
+
+This file contains the exact submission format for the forecasts. Please submit csv file only.
+
+|Variable	|Definition|
+|---------|----------|
+|ID	|Unique Identifier for a row|
+|Sales	(Target) |Total Course Sales predicted from the test set|
+
+# Evaluation Metric
+
+The evaluation metric for this competition is 1000*RMSLE where RMSLE is Root of Mean Squared Logarithmic Error across all entries in the test set.
+
+
+# Data Exploration
+
+Now let's explore the train data:-
+
+# Train data
+
+```{r Import Libraries, message=FALSE, warning=FALSE, paged.print=FALSE,echo=FALSE}
+#R version 3.6.2 
+library(data.table)
+library(DataExplorer)
+library(ggplot2)
+library(Metrics)
+library(keras)
+#install_keras()
+library(tensorflow)
+#install_tensorflow()
+library(caret)
+library(xgboost)
+library(tidyr)
+
+```
+
+Top and Bottom of the data
+```{r,echo=FALSE}
+train<-fread("train.csv",stringsAsFactors = T,na.strings = c("NA",""))
+test<-fread("test_QkPvNLx.csv",stringsAsFactors = T,na.strings = c("NA",""))
+head(train)
+```
+
+```{r,echo=FALSE}
+tail(train)
+```
+
+Change the data type of attributes.
+
+```{r,echo=FALSE}
+
+train[,c("Day_No","Course_ID","Short_Promotion","Long_Promotion","Public_Holiday")]<-lapply(train[,c("Day_No","Course_ID","Short_Promotion","Long_Promotion","Public_Holiday")], as.factor)
+test[,c("Day_No","Course_ID","Short_Promotion","Long_Promotion","Public_Holiday")]<-lapply(test[,c("Day_No","Course_ID","Short_Promotion","Long_Promotion","Public_Holiday")], as.factor)
+
+```
+
+
+# Basic stats of the train data
+```{r,echo=FALSE}
+summary(train)
+```
+
+# courses with Zero Sales
+```{r,echo=FALSE}
+train[Sales==0,]
+```
+There are some courses with Development Domain having zero sales on different Day No.
+
+
+
+# Basic stats of the test data
+```{r,echo=FALSE}
+summary(test)
+```
+
+# Checking Missing data
+```{r,echo=FALSE}
+introduce(train)
+```
+
+# Total Sales by each Course
+```{r,echo=FALSE}
+DT<-train[,list("Total_sales"=sum(Sales)),by=list(Course_ID)]
+setorder(DT,Total_sales, -Course_ID)
+DT
+```
+
+```{r,echo=FALSE}
+DT<-train[,c("Day_No","Course_ID","Sales")]
+DT1<-spread(DT,Course_ID,Sales)
+```
+
+
+
+# Visualization of the data
+
+## Univariate and Bivariate Analysis
+
+### Distribution of Course Domain
+```{r,echo=FALSE}
+ggplot(train, aes(x = train$Course_Domain)) +
+  geom_bar(aes(y = (..count..)/sum(..count..),fill=train$Course_Domain)) +
+  geom_text(aes(y = ((..count..)/sum(..count..)), label = scales::percent((..count..)/sum(..count..))), stat = "count", vjust = -0.3) + theme_classic()+theme(legend.position = "none")+labs(x="Course Domain",y= "Percent of Course Domain")
+```
+
+From the above graph we can see that out of 600 courses, *52%* of couses belongs to *Develpment* domain,*32%* of course belong to *Software Marketting* and *15%* of courses belongs to *Finance  Accounting* while only *1%* of course  belongs to *Business Domain*.
+
+### Distribution of Course Type
+```{r,echo=FALSE}
+ggplot(train, aes(x = train$Course_Type)) +
+  geom_bar(aes(y = (..count..)/sum(..count..),fill=train$Course_Type)) +
+  geom_text(aes(y = ((..count..)/sum(..count..)), label = scales::percent((..count..)/sum(..count..))), stat = "count", vjust = -0.3) + theme_classic()+theme(legend.position = "none")+labs(x="Course Type",y= "Percent of Course Type")
+```
+
+There are *51.3% *of Courses  are *Course Type* and *48.3%*  of courses *Progrme Type* while only  *0.3%* of courses are of *Degree Type*. 
+
+### Comparative analysis of Course Domain and Course Type
+```{r,echo=FALSE}
+ggplot(train, aes(x = train$Course_Domain)) +
+  geom_bar(aes(y = (..count..)/sum(..count..),fill=train$Course_Domain)) +
+  geom_text(aes(y = ((..count..)/sum(..count..)), label = scales::percent((..count..)/sum(..count..))), stat = "count", vjust = -0.3)+coord_flip() +facet_grid(train$Course_Type) +theme_classic()+theme(legend.position = "none")+labs(x="Course Domain",y= "Percent of Course Domain")
+```
+
+### Comparative analysis of Course Domain and User traffic
+```{r,echo=FALSE}
+
+ggplot(train,aes(Course_Domain,User_Traffic,fill=Course_Type))+geom_col() +theme_classic()+labs(x="Course domain")
+
+
+```
+
+From the above graph we can conclude that there are more number of *user traffic* for *Development Domain* and for *Course Type* followed by *Software Marketting* for *Program Type*.
+
+### Comparative analysis of Course Domain and Competitive Metric
+```{r,echo=FALSE}
+ggplot(train,aes(Course_Domain,Competition_Metric,fill=Course_Type))+geom_col() +theme_classic()
+```
+
+The strength of competition is more for *Development Domain* and of *Program Type*.
+
+### Comparative analysis of Course Domain and Sales
+```{r,echo=FALSE}
+ggplot(train,aes(Course_Domain,Sales,fill=Course_Type))+geom_col() +theme_classic()
+```
+
+There are more sales for *Development Domain* courses  and of *Course Type*, followed by *Software Marketting* for *Program Type*.
+
+# Analyze the Effect of short Term promotion,Long term Promotion and Public Holidays on sales
+
+## Short Promotion
+```{r,echo=FALSE}
+ggplot(train,aes(Course_Domain,Sales,fill=Course_Type))+geom_col() +theme_classic()+facet_grid(train$Short_Promotion)
+```
+
+## Long Promotion
+```{r,echo=FALSE}
+ggplot(train,aes(Course_Domain,Sales,fill=Course_Type))+geom_col() +theme_classic()+facet_grid(train$Long_Promotion)
+```
+
+## Public Holiday
+```{r,echo=FALSE}
+ggplot(train,aes(Course_Domain,Sales,fill=Course_Type))+geom_col() +theme_classic()+facet_grid(train$Public_Holiday)
+```
+
+From the above 3 graph we can see that Sale of courses is more when Short Promotion and Long Promotion is live and when there is Regional Holiday.
+
+# Model Building
+
+For model Building we need to pre-process the data and after that Data splitting into traindata and test data.
+
+## Data Preprocessing
+
+1- Imputation of missing values in the data.
+
+2- Encoding of the Categorical features of the data.
+
+```{r,echo=FALSE}
+train[which(is.na(train$Competition_Metric)),"Competition_Metric"]<-mean(train$Competition_Metric,na.rm = T)
+test[which(is.na(test$Competition_Metric)),"Competition_Metric"]<-mean(test$Competition_Metric,na.rm = T)
+```
+
+```{r,echo=FALSE}
+train[,c("Day_No","Course_ID","Short_Promotion","Long_Promotion","Public_Holiday")]<-lapply(train[,c("Day_No","Course_ID","Short_Promotion","Long_Promotion","Public_Holiday")], as.numeric)
+test[,c("Day_No","Course_ID","Short_Promotion","Long_Promotion","Public_Holiday")]<-lapply(test[,c("Day_No","Course_ID","Short_Promotion","Long_Promotion","Public_Holiday")], as.numeric)
+
+
+train[,c("Course_Domain","Course_Type")]<-lapply(train[,c("Course_Domain","Course_Type")], as.numeric)
+test[,c("Course_Domain","Course_Type")]<-lapply(test[,c("Course_Domain","Course_Type")], as.numeric)
+
+str(train)
+summary(train)
+```
+
+
+```{r,echo=FALSE}
+train<-train[,-c("ID","User_Traffic")]
+newtest<-test[,-c("ID")]
+trainindex<-createDataPartition(train$Sales,time=1,p=0.7,list = F)
+traindata<-train[trainindex,]
+testdata<-train[-trainindex,]
+```
+
+## Predictive Model and Evaluation
+
+### Regression with Xgboost Model
+
+```{r, echo=FALSE}
+#Prepare Matrix
+
+dtrain <- xgb.DMatrix(as.matrix(traindata[,-c("Sales","Day_No")]), label = as.matrix(log(traindata$Sales+1)))
+dtest<-xgb.DMatrix(as.matrix(testdata[,-"Sales"]), label = as.matrix(log(testdata$Sales+1)))
+
+##for model5 
+# dtrain <- xgb.DMatrix(as.matrix(traindata[,-"Sales"]), label = as.matrix(sqrt(traindata$Sales)+1))
+# dtest<-xgb.DMatrix(as.matrix(testdata[,-"Sales"]), label = as.matrix(sqrt(testdata$Sales)+1))
+
+dfinal<-xgb.DMatrix(as.matrix(newtest))
+
+
+#default parameters
+
+params <- list(booster = "gbtree", objective = "reg:linear", eta=0.4, max_depth=7, min_child_weight=2, subsample=0.5, colsample_bytree=1,gamma=6,lambda=3)
+
+#gbtree and gblinear can be used for regression
+
+#model training
+# xgb1 <- xgb.train(params = params, data = dtrain,nthread = 2 ,nrounds = 500, watchlist = list(val=dtest,train=dtrain), print_every_n = 10, early_stop_round = 10, maximize = F , eval_metric ="rmse",eval_metric="logloss")
+
+#model2
+params <- list(booster = "gbtree", objective = "reg:linear", eta=0.4, max_depth=7, min_child_weight=2, subsample=0.5, colsample_bytree=1,gamma=6,lambda=3)
+
+# xgb2 <- xgb.train (params = params, data = dtrain,nthread = 2 ,nrounds = 1000, watchlist = list(val=dtest,train=dtrain), print_every_n = 10, early_stop_round = 10, maximize = F , eval_metric = "rmse",eval_metric="logloss")
+
+#model3 
+params <- list(booster = "gbtree", objective = "reg:linear", eta=0.4, max_depth=7, min_child_weight=2, subsample=0.5, colsample_bytree=1,gamma=5,lambda=3)
+# xgb3 <- xgb.train (params = params, data = dtrain,nthread = 2 ,nrounds = 1000, watchlist = list(val=dtest,train=dtrain), print_every_n = 10, early_stop_round = 10, maximize = F , eval_metric = "rmse",eval_metric="logloss")
+
+
+#model4
+params <- list(booster = "gbtree", objective = "reg:linear", eta=0.4, max_depth=7, min_child_weight=2, subsample=0.5, colsample_bytree=1,gamma=7,lambda=3)#xgb3 g=5
+# xgb4 <- xgb.train (params = params, data = dtrain,nthread = 2 ,nrounds = 1000, watchlist = list(val=dtest,train=dtrain), print_every_n = 10, early_stop_round = 10, maximize = F , eval_metric = "rmse",eval_metric="logloss")
+
+
+``` 
+
+
+# Prediction on test data
+```{r include=FALSE}
+#saveRDS(xgb1,"xgb5.rds")
+
+xgb<-readRDS("xgb1.rds")
+
+ypred = predict(xgb, dtest)
+
+ypred<-round(exp(ypred)-1)
+#ypred<-round((ypred-1)^2)
+ypred<-as.data.frame(ypred)
+
+##final
+pred<-predict(xgb, dfinal)
+pred<-as.data.frame(exp(pred)-1)
+#pred<-as.data.frame((pred-1)^2)
+
+# Final prediction
+
+smodel<-cbind(test[,"ID"],round(pred$`exp(pred) - 1`))
+#smodel<-cbind(test[,"ID"],round(pred$`(pred - 1)^2`)
+
+colnames(smodel)[2]<-"Sales"
+#write.csv(smodel,"modelxgb5.csv",row.names = F)
+```
+
+```{r,echo=FALSE}
+head(smodel)
+```
+
+# Important Features
+```{r warning=FALSE, include=FALSE}
+imp<-xgb.importance(model=xgb)
+gg<-xgb.ggplot.importance(importance_matrix=imp, measure = "Frequency", rel_to_first = TRUE)
+
+```
+
+
+```{r,echo=FALSE, warning=FALSE}
+gg + ggplot2::ylab("Frequency")
+```
+
+
+# Evaluation
+
+For evaluation of model we will use 1000*RMSLE where RMSLE is Root of Mean Squared Logarithmic Error.
+
+```{r,echo=FALSE}
+rmsle(testdata$Sales, ypred$ypred)*1000
+#xgb1-190.4173  ,232.7310348676
+#xgb2-188.7656 ,234.9111372312622.
+#xgb3-184.038,235.29858954860663.
+#xgb4-192.1674, 235.2724321888955.
+#xgb5-148.7621,269.148228789197
+```
+
+# Visualize Result
+
+```{r, echo=FALSE} 
+x_axes = seq(1:length(ypred$ypred))
+plot(x_axes, testdata$Sales, ylim = c(min(ypred$ypred), max(testdata$Sales)),
+     col = "burlywood", type = "l", lwd = 2, ylab = "Sales")
+lines(x_axes, ypred$ypred, col = "red", type = "l", lwd = 2)
+legend("topleft", legend = c("y-test", "y-pred"),
+       col = c("burlywood", "red"), lty = 1, cex=0.7, lwd=2, bty='n') 
+
+```
+
+
+
+# Regression  with CNN Model 
+
+```{r,echo=FALSE}
+set.seed(123)
+ 
+xtrain = as.matrix(traindata[,-"Sales"])
+ytrain = as.matrix(traindata[,"Sales"])
+#ytrain = as.matrix(traindata[,log(traindata$Sales+1)])
+xtest = as.matrix(testdata[,-"Sales"])
+ytest = as.matrix(testdata[, "Sales"])
+#ytest = as.matrix(testdata[, log(testdata$Sales+1)])
+
+
+ftest<-as.matrix(newtest)
+
+```
+
+
+```{r, echo=FALSE}
+#adding another one-dimension
+xtrain = array(xtrain, dim = c(nrow(xtrain), 8, 1))
+xtest = array(xtest, dim = c(nrow(xtest), 8, 1))
+
+ftest<-array(ftest, dim = c(nrow(ftest), 8, 1))
+
+```
+
+# Extract the input dimension for the Keras model
+```{r ,echo=FALSE}
+
+in_dim = c(dim(xtrain)[2:3])
+
+print(in_dim)
+```
+
+# Model Fitting
+```{r, echo=FALSE}
+model = keras_model_sequential() %>%
+  layer_conv_1d(filters = 64, kernel_size = 2,
+                input_shape = in_dim, activation = "relu") %>%
+  layer_conv_1d(filters = 64, kernel_size = 2,activation = "relu") %>%
+  layer_conv_1d(filters = 64, kernel_size = 2,activation = "relu") %>%
+  layer_conv_1d(filters = 64, kernel_size = 2,activation = "relu") %>%
+  layer_flatten() %>%
+  layer_dense(units = 64, activation = "relu") %>%
+  #layer_dropout(rate = 0.5) %>%
+  layer_dense(units = 64, activation = "relu")%>%
+  #layer_dropout(rate = 0.25) %>%
+  layer_dense(units = 16, activation = "relu")%>%
+  layer_dense(units = 8, activation = "relu")%>%
+  layer_dense(units = 1, activation = "linear")
+
+model %>% compile(
+  loss = "mse",
+  optimizer = "adam")
+
+model %>% summary()
+ 
+``` 
+
+```{r,echo=FALSE}
+#model1
+#model %>% fit(xtrain, ytrain, epochs = 10, batch_size=16, verbose = 0)
+#model2
+#model %>% fit(xtrain, ytrain, epochs = 50, batch_size=32, verbose = 0)
+#model3
+#model %>% fit(xtrain, ytrain, epochs = 100, batch_size=64, verbose = 0)
+#model4
+#model %>% fit(xtrain, ytrain, epochs = 200, batch_size=64, verbose = 0)#adding dropout layer
+#model5
+#model %>% fit(xtrain, ytrain, epochs = 50, batch_size=32, verbose = 0)#with log of response variable
+
+model<-load_model_hdf5("sales_cnn2.h5")
+scores = model %>% evaluate(xtrain, ytrain, verbose = 0)
+print(scores)#loss 
+#save_model_hdf5(model,"sales_cnn5.h5")
+#cnn1-1265.745 
+#cnn2-888.2121
+#cnn3-816.764 
+#cnn4-1591.469 
+#cnn5-0.07817419 
+
+```
+
+
+# Prediction on test data
+```{r, echo=FALSE}
+
+ypred = model %>% predict(xtest)
+#ypred <-exp(ypred)-1
+
+
+#final
+pred<-model %>% predict(ftest)
+#pred<-exp(pred)-1
+pred<-as.data.frame(pred)
+
+
+smodel1<-cbind(test[,"ID"],round(pred[,"V1"]))
+colnames(smodel1)[2]<-"Sales"
+#write.csv(smodel1,"model5.csv",row.names = F)
+#cnn1-266.657715717313
+#cnn2-244.13390253904123
+#cnn3-252.749636788946
+#cnn4-301.501476749345
+#cnn5-245.258290262309
+
+``` 
+
+```{r,echo=FALSE}
+head(smodel1)
+```
+
+# Evaluation Metric
+
+To evaluate our model we will use 1000*RMSLE where RMSLE is Root of Mean Squared Logarithmic Error.
+
+```{r,echo=FALSE}
+rmsle(testdata$Sales, round(ypred))*1000
+#cnn1=323.7799
+#=281.2286
+#=274.5491
+#cnn4=325.5426
+#cnn5=278.061
+```
+
+
+# Visualize Result
+```{r, echo=FALSE} 
+x_axes = seq(1:length(ypred))
+plot(x_axes, ytest, ylim = c(min(ypred), max(ytest)),
+     col = "burlywood", type = "l", lwd = 2, ylab = "Sales")
+lines(x_axes, ypred, col = "red", type = "l", lwd = 2)
+legend("topleft", legend = c("y-test", "y-pred"),
+       col = c("burlywood", "red"), lty = 1, cex=0.7, lwd=2, bty='n') 
+
+```
+
+# Ensemble Model
+
+Combine the result of all best models.
+```{r,echo=FALSE}
+model1<-fread("model/modelxgb1.csv")
+model2<-fread("model/modelxgb2.csv")
+model3<-fread("model/model2.csv")
+model1$Sales<-round((model1$Sales+model2$Sales+model3$Sales)/3)
+#write.csv(model1,"enmodel1.csv",row.names = F)
+head(model1)#223.4017241308
+```
+
+
