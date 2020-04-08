@@ -1,6 +1,6 @@
 # Women-in-the-loop
 
-![](Hackathon_Banner_Final.jpeg)
+![]("Hackathon_Banner_Final.jpeg")
 
 LearnX Sales Forecasting
 
@@ -70,6 +70,6 @@ This file contains the exact submission format for the forecasts. Please submit 
 
 The evaluation metric for this competition is 1000*RMSLE where RMSLE is Root of Mean Squared Logarithmic Error across all entries in the test set.
 
-### Private Score  - 225.769782233722      Rank - 237
+#### Private Score  - 225.769782233722,      Rank - 237
 
-### Public Score  - 223.401724130756      Rank - 254
+#### Public Score  - 223.401724130756,      Rank - 254
